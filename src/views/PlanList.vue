@@ -1,11 +1,21 @@
 <script setup>
+import { computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTravelStore } from '../stores/travel'
+import { TRIP_TYPES } from '../constants'
 import { formatDate, formatMoney } from '../utils/format'
 import { planTotalSpend, planPackingRate } from '../services/selectors'
 
 const store = useTravelStore()
 const router = useRouter()
+
+// 检索条件只存在页面内存中，不写入 store / 本地存储
+const filters = reactive({
+  keyword: '',
+  tripType: '',
+  dateFrom: '',
+  dateTo: '',
+})
 
 function tripTypeClass(type) {
   return { 出国: 'tag-red', 长途: 'tag-orange', 出差: 'tag-blue' }[type] || 'tag-green'
@@ -16,17 +26,99 @@ function onDelete(plan) {
     store.deletePlan(plan.id)
   }
 }
+
+const normalizedKeyword = computed(() => filters.keyword.trim().toLowerCase())
+
+// 是否有任一检索条件生效
+const hasActiveFilter = computed(
+  () =>
+    !!normalizedKeyword.value ||
+    !!filters.tripType ||
+    !!filters.dateFrom ||
+    !!filters.dateTo,
+)
+
+const filteredPlans = computed(() => {
+  if (!hasActiveFilter.value) return store.plans
+
+  const keyword = normalizedKeyword.value
+  const { tripType, dateFrom, dateTo } = filters
+
+  return store.plans.filter((plan) => {
+    // 关键词：匹配名称、目的地、备注
+    if (keyword) {
+      const haystack = [plan.name, plan.destination, plan.notes]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      if (!haystack.includes(keyword)) return false
+    }
+
+    // 出行类型
+    if (tripType && plan.tripType !== tripType) return false
+
+    // 日期范围：行程区间 [startDate, endDate] 与所选范围有重叠即命中，任一端可单独填写
+    if (dateFrom && plan.endDate < dateFrom) return false
+    if (dateTo && plan.startDate > dateTo) return false
+
+    return true
+  })
+})
+
+function resetFilters() {
+  filters.keyword = ''
+  filters.tripType = ''
+  filters.dateFrom = ''
+  filters.dateTo = ''
+}
 </script>
 
 <template>
   <div>
     <div class="flex-between mb-16">
-      <p class="text-secondary">共 {{ store.plans.length }} 个出行计划</p>
+      <p class="text-secondary">
+        共 {{ store.plans.length }} 个出行计划
+        <span v-if="hasActiveFilter" class="filter-count">· 检索到 {{ filteredPlans.length }} 个</span>
+      </p>
       <button class="btn btn-primary" @click="router.push('/plans/new')">+ 新建出行计划</button>
     </div>
 
-    <div v-if="store.plans.length" class="plan-grid">
-      <div v-for="plan in store.plans" :key="plan.id" class="plan-card" @click="router.push(`/plans/${plan.id}`)">
+    <div class="card filter-bar mb-16">
+      <div class="filter-keyword">
+        <span class="filter-search-icon">🔍</span>
+        <input
+          v-model="filters.keyword"
+          class="input"
+          type="search"
+          placeholder="搜索名称、目的地或备注关键词"
+        />
+      </div>
+      <div class="filter-row">
+        <div class="filter-field">
+          <label class="filter-label">出行类型</label>
+          <select v-model="filters.tripType" class="select">
+            <option value="">全部类型</option>
+            <option v-for="t in TRIP_TYPES" :key="t" :value="t">{{ t }}</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label class="filter-label">出发日期起</label>
+          <input v-model="filters.dateFrom" class="input" type="date" />
+        </div>
+        <div class="filter-field">
+          <label class="filter-label">返回日期止</label>
+          <input v-model="filters.dateTo" class="input" type="date" />
+        </div>
+        <div class="filter-actions">
+          <button class="btn btn-ghost" :disabled="!hasActiveFilter" @click="resetFilters">
+            清空条件
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="filteredPlans.length" class="plan-grid">
+      <div v-for="plan in filteredPlans" :key="plan.id" class="plan-card" @click="router.push(`/plans/${plan.id}`)">
         <div class="plan-cover">
           <img v-if="plan.photo" :src="plan.photo" alt="目的地照片" />
           <div v-else class="plan-cover-placeholder">{{ plan.destination.slice(0, 1) }}</div>
@@ -65,6 +157,15 @@ function onDelete(plan) {
       </div>
     </div>
 
+    <!-- 已有计划但检索无结果 -->
+    <div v-else-if="store.plans.length" class="card empty">
+      <p class="empty-icon">🔍</p>
+      <p>没有符合条件的出行计划</p>
+      <p class="text-muted mt-16">试试更换关键词，或放宽出行类型与日期范围</p>
+      <button class="btn btn-primary mt-16" @click="resetFilters">清空检索条件</button>
+    </div>
+
+    <!-- 一个计划都还没有 -->
     <div v-else class="card empty">
       <p class="empty-icon">+</p>
       <p>还没有出行计划</p>
@@ -74,6 +175,52 @@ function onDelete(plan) {
 </template>
 
 <style scoped>
+.filter-count {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.filter-keyword {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.filter-keyword .input {
+  padding-left: 36px;
+}
+
+.filter-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.filter-actions {
+  display: flex;
+}
+
 .plan-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -169,5 +316,11 @@ function onDelete(plan) {
   display: flex;
   gap: 8px;
   padding: 0 16px 16px;
+}
+
+@media (max-width: 900px) {
+  .filter-row {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
