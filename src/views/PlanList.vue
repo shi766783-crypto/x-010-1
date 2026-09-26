@@ -1,11 +1,34 @@
 <script setup>
+import { computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTravelStore } from '../stores/travel'
 import { formatDate, formatMoney } from '../utils/format'
-import { planTotalSpend, planPackingRate } from '../services/selectors'
+import { planTotalSpend, planPackingRate, filterPlans } from '../services/selectors'
+import { TRIP_TYPES } from '../constants'
 
 const store = useTravelStore()
 const router = useRouter()
+
+// 检索条件仅保存在页面内存中，不写回 store / 本地存储
+const filters = reactive({
+  keyword: '',
+  tripType: '',
+  dateFrom: '',
+  dateTo: '',
+})
+
+const filteredPlans = computed(() => filterPlans(store.plans, filters))
+
+const hasActiveFilters = computed(
+  () => Boolean(filters.keyword.trim() || filters.tripType || filters.dateFrom || filters.dateTo)
+)
+
+function resetFilters() {
+  filters.keyword = ''
+  filters.tripType = ''
+  filters.dateFrom = ''
+  filters.dateTo = ''
+}
 
 function tripTypeClass(type) {
   return { 出国: 'tag-red', 长途: 'tag-orange', 出差: 'tag-blue' }[type] || 'tag-green'
@@ -21,12 +44,52 @@ function onDelete(plan) {
 <template>
   <div>
     <div class="flex-between mb-16">
-      <p class="text-secondary">共 {{ store.plans.length }} 个出行计划</p>
+      <p class="text-secondary">
+        <template v-if="hasActiveFilters">
+          筛选出 {{ filteredPlans.length }} 个，共 {{ store.plans.length }} 个出行计划
+        </template>
+        <template v-else>共 {{ store.plans.length }} 个出行计划</template>
+      </p>
       <button class="btn btn-primary" @click="router.push('/plans/new')">+ 新建出行计划</button>
     </div>
 
-    <div v-if="store.plans.length" class="plan-grid">
-      <div v-for="plan in store.plans" :key="plan.id" class="plan-card" @click="router.push(`/plans/${plan.id}`)">
+    <div v-if="store.plans.length" class="card filter-bar mb-16">
+      <div class="filter-grid">
+        <div class="filter-field filter-keyword">
+          <label class="filter-label" for="filter-keyword">关键词</label>
+          <input
+            id="filter-keyword"
+            v-model="filters.keyword"
+            class="input"
+            type="search"
+            placeholder="搜索名称、目的地或备注"
+          />
+        </div>
+        <div class="filter-field">
+          <label class="filter-label" for="filter-trip-type">出行类型</label>
+          <select id="filter-trip-type" v-model="filters.tripType" class="select">
+            <option value="">全部类型</option>
+            <option v-for="type in TRIP_TYPES" :key="type" :value="type">{{ type }}</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label class="filter-label" for="filter-date-from">日期从</label>
+          <input id="filter-date-from" v-model="filters.dateFrom" class="input" type="date" />
+        </div>
+        <div class="filter-field">
+          <label class="filter-label" for="filter-date-to">日期至</label>
+          <input id="filter-date-to" v-model="filters.dateTo" class="input" type="date" />
+        </div>
+        <div class="filter-actions">
+          <button class="btn btn-ghost" :disabled="!hasActiveFilters" @click="resetFilters">
+            清空条件
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="filteredPlans.length" class="plan-grid">
+      <div v-for="plan in filteredPlans" :key="plan.id" class="plan-card" @click="router.push(`/plans/${plan.id}`)">
         <div class="plan-cover">
           <img v-if="plan.photo" :src="plan.photo" alt="目的地照片" />
           <div v-else class="plan-cover-placeholder">{{ plan.destination.slice(0, 1) }}</div>
@@ -65,6 +128,13 @@ function onDelete(plan) {
       </div>
     </div>
 
+    <div v-else-if="hasActiveFilters" class="card empty">
+      <p class="empty-icon">∅</p>
+      <p>没有符合当前条件的出行计划</p>
+      <p class="empty-hint">试试更换关键词，或放宽出行类型与日期范围</p>
+      <button class="btn btn-primary mt-16" @click="resetFilters">清空筛选条件</button>
+    </div>
+
     <div v-else class="card empty">
       <p class="empty-icon">+</p>
       <p>还没有出行计划</p>
@@ -74,6 +144,39 @@ function onDelete(plan) {
 </template>
 
 <style scoped>
+.filter-bar {
+  padding: 16px;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filter-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.filter-actions {
+  display: flex;
+  align-items: flex-end;
+}
+
+.empty-hint {
+  font-size: 13px;
+  margin-top: 4px;
+}
+
 .plan-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -169,5 +272,15 @@ function onDelete(plan) {
   display: flex;
   gap: 8px;
   padding: 0 16px 16px;
+}
+
+@media (max-width: 900px) {
+  .filter-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .filter-keyword {
+    grid-column: 1 / -1;
+  }
 }
 </style>

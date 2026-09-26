@@ -48,3 +48,27 @@ export function planTodosAllDone(plan) {
   const todos = plan.todos || []
   return todos.length > 0 && todos.every((t) => t.done)
 }
+
+// 按关键词、出行类型与日期范围组合筛选计划
+// 关键词同时匹配名称、目的地、备注；日期范围按行程区间重叠判断。
+// 纯内存计算，返回新数组，不修改计划数据。
+export function filterPlans(plans, { keyword = '', tripType = '', dateFrom = '', dateTo = '' } = {}) {
+  const kw = keyword.trim().toLowerCase()
+  // 起止颠倒时自动交换，避免误操作导致全部落空
+  let from = dateFrom
+  let to = dateTo
+  if (from && to && from > to) [from, to] = [to, from]
+
+  return plans.filter((plan) => {
+    if (kw) {
+      const matched = [plan.name, plan.destination, plan.notes]
+        .some((text) => (text || '').toLowerCase().includes(kw))
+      if (!matched) return false
+    }
+    if (tripType && plan.tripType !== tripType) return false
+    // 日期为 YYYY-MM-DD 字符串，可直接按字典序比较
+    if (from && (!plan.endDate || plan.endDate < from)) return false
+    if (to && (!plan.startDate || plan.startDate > to)) return false
+    return true
+  })
+}
